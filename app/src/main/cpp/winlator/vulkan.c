@@ -11,6 +11,7 @@
 #include <android/api-level.h>
 #include <signal.h>
 #include <setjmp.h>
+#include <pthread.h>
 #include "../adrenotools/include/adrenotools/driver.h"
 
 #define LOG_TAG "System.out"
@@ -30,6 +31,8 @@ static void *vulkan_handle = NULL;
 // crashing. Read by GPUInformation.driverLoadedFellBack() to surface a UI note. Never
 // set for wrapper/turnip probes — those legitimately probe against the system ICD.
 static int last_driver_fell_back = 0;
+
+static pthread_mutex_t probe_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static sigjmp_buf sigill_jmp_buf;
 static struct sigaction saved_sigill_action;
@@ -289,6 +292,7 @@ static VkResult enumerate_physical_devices() {
         return result;
 
     physicalDevice = pdevices[0];
+    free(pdevices);
 
     if (physicalDevice == VK_NULL_HANDLE)
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -296,8 +300,7 @@ static VkResult enumerate_physical_devices() {
     return VK_SUCCESS;
 }
 
-JNIEXPORT jstring JNICALL
-Java_com_winlator_star_core_GPUInformation_getVulkanVersion(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+static jstring probe_getVulkanVersion(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
     install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
@@ -328,7 +331,9 @@ Java_com_winlator_star_core_GPUInformation_getVulkanVersion(JNIEnv *env, jclass 
 
         restore_probe_signal_guard();
         cleanup_vulkan();
-        return (*env)->NewStringUTF(env, driverVersion);
+        jstring result = (*env)->NewStringUTF(env, driverVersion);
+        free(driverVersion);
+        return result;
     }
 
     printf("Probe signal caught: driver incompatible");
@@ -337,8 +342,7 @@ Java_com_winlator_star_core_GPUInformation_getVulkanVersion(JNIEnv *env, jclass 
     return (*env)->NewStringUTF(env, "Unknown");
 }
 
-JNIEXPORT jint JNICALL
-Java_com_winlator_star_core_GPUInformation_getVendorID(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+static jint probe_getVendorID(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
     install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
@@ -376,8 +380,7 @@ Java_com_winlator_star_core_GPUInformation_getVendorID(JNIEnv *env, jclass obj, 
 }
 
 
-JNIEXPORT jstring JNICALL
-Java_com_winlator_star_core_GPUInformation_getRenderer(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+static jstring probe_getRenderer(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
     install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
@@ -405,7 +408,9 @@ Java_com_winlator_star_core_GPUInformation_getRenderer(JNIEnv *env, jclass obj, 
 
         restore_probe_signal_guard();
         cleanup_vulkan();
-        return (*env)->NewStringUTF(env, renderer);
+        jstring result = (*env)->NewStringUTF(env, renderer);
+        free(renderer);
+        return result;
     }
 
     printf("Probe signal caught: driver incompatible");
@@ -414,8 +419,7 @@ Java_com_winlator_star_core_GPUInformation_getRenderer(JNIEnv *env, jclass obj, 
     return (*env)->NewStringUTF(env, "Unknown");
 }
 
-JNIEXPORT jobjectArray JNICALL
-Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+static jobjectArray probe_enumerateExtensions(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
     install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
@@ -482,4 +486,41 @@ Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jcla
     restore_probe_signal_guard();
     cleanup_vulkan();
     return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
+}
+
+// Every probe shares this file's globals (instance, physicalDevice, vulkan_handle, the jump
+// buffer and the saved signal handlers) and swaps process-wide signal handlers while it runs,
+// so two probes from different threads must never overlap. Callers in Kotlin only partly
+// serialize them (graphicsProbeMutex covers some editors, not every call site).
+
+JNIEXPORT jstring JNICALL
+Java_com_winlator_star_core_GPUInformation_getVulkanVersion(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+    pthread_mutex_lock(&probe_lock);
+    jstring result = probe_getVulkanVersion(env, obj, driverName, context);
+    pthread_mutex_unlock(&probe_lock);
+    return result;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_winlator_star_core_GPUInformation_getVendorID(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+    pthread_mutex_lock(&probe_lock);
+    jint result = probe_getVendorID(env, obj, driverName, context);
+    pthread_mutex_unlock(&probe_lock);
+    return result;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_winlator_star_core_GPUInformation_nativeGetRenderer(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+    pthread_mutex_lock(&probe_lock);
+    jstring result = probe_getRenderer(env, obj, driverName, context);
+    pthread_mutex_unlock(&probe_lock);
+    return result;
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+    pthread_mutex_lock(&probe_lock);
+    jobjectArray result = probe_enumerateExtensions(env, obj, driverName, context);
+    pthread_mutex_unlock(&probe_lock);
+    return result;
 }

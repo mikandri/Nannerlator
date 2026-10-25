@@ -114,9 +114,57 @@ public abstract class GPUInformation {
         }
     }
 
+    /**
+     * Adreno 810 / 812 (Snapdragon 7s Gen 3 and relatives; 812 is a higher-clocked 810). Gen8 like
+     * 830/840 but a different class of part: a 576 KB GMEM (so Turnip runs it sysmem-only) and the
+     * ray-tracing units fused off. Code that treats "any Adreno 8xx" as an 830/840 should ask this
+     * first.
+     */
+    public static boolean isAdreno810Class(String renderer) {
+        String model = extractModelName(renderer);
+        if (model == null) return false;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?i)Adreno\\s*(\\d+)").matcher(model);
+        if (!m.find()) return false;
+        switch (m.group(1)) {
+            case "810": case "812":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static boolean isAdreno810Class(Context context) {
+        return isAdreno810Class(getRenderer(null, context));
+    }
+
+    private static String cachedSystemRenderer = null;
+
+    /**
+     * Renderer name of a Vulkan driver. Every native probe creates a Vulkan instance from scratch
+     * and loads + unloads the driver, and the SYSTEM driver is asked for by many call sites (some of
+     * them on the main thread) although its answer cannot change while the process lives. So the
+     * system answer (driverName null or "System") is probed once and cached; a failed probe
+     * ("Unknown") is not cached, so the next call retries. Named drivers always probe.
+     */
+    public static String getRenderer(String driverName, Context context) {
+        boolean system = driverName == null || driverName.equals("System");
+        if (!system) return nativeGetRenderer(driverName, context);
+        synchronized (GPUInformation.class) {
+            if (cachedSystemRenderer != null) return cachedSystemRenderer;
+        }
+        String renderer = nativeGetRenderer(driverName, context);
+        if (renderer != null && !renderer.toLowerCase().contains("unknown")) {
+            synchronized (GPUInformation.class) {
+                cachedSystemRenderer = renderer;
+            }
+        }
+        return renderer;
+    }
+
     public native static String getVulkanVersion(String driverName, Context context);
     public native static int getVendorID(String driverName, Context context);
-    public native static String getRenderer(String driverName, Context context);
+    private native static String nativeGetRenderer(String driverName, Context context);
     public native static String[] enumerateExtensions(String driverName, Context context);
     // True when the most recent native probe (getRenderer/enumerateExtensions/getVendorID)
     // selected a real installed Adrenotools custom driver that couldn't load on this GPU and

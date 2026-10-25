@@ -98,6 +98,11 @@ public final class WaylandGameDriver {
         switch (n) {
             case "710": case "720": case "722":
                 return VARIANT_A7XX;
+            case "810": case "812":
+                // Not the plain a8xx build (that one targets 830/840): the gen8 recipe carries the
+                // Adreno 810 work (small-GMEM cache fraction, reg_size, codegen tuning). Needs an
+                // on-device check on a 7s Gen 3; an imported driver still overrides this.
+                return VARIANT_A8XX_GEN8;
             default:
                 // Any Adreno 8xx (830, 840, …): the a8xx build.
                 return n.length() == 3 && n.charAt(0) == '8' ? VARIANT_A8XX : VARIANT_PLAIN;

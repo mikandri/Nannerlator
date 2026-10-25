@@ -84,6 +84,9 @@ object VegasTierPresets {
         if (!s.contains("adreno", ignoreCase = true)) return null
         val num = Regex("(\\d+)").find(s)?.groupValues?.get(1) ?: return null
         val v = num.toIntOrNull() ?: return null
+        // Adreno 810/812 is gen8 by number but a mid-range part (576 KB GMEM, sysmem-only on
+        // Turnip): the high-end tier's draw thresholds and frame-gen budget overshoot it.
+        if (v == 810 || v == 812) return 2
         if (v >= 700) return 3
         TIERS.firstOrNull { t -> t.models.any { m -> num.startsWith(m) } }?.let { return it.number }
         return when {

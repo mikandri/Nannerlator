@@ -724,7 +724,10 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         lsfgAutoEnable      = seed?.isLsfgAutoEnable != false   // default ON for new/unset containers (GameNative parity)
         seedFgCaptureSelection(seed?.fgCaptureResolution)
         lsfgVk11Compat      = seed?.isLsfgVk11Compat == true
-        fpsLimiterEnabled  = seed?.isFpsLimiterEnabled == true
+        // Adreno 810 (7s Gen 3): a brand-new container with no saved defaults profile starts with the
+        // FPS limiter on (Container.FPS_LIMITER_DEFAULT = 60). On a 120 Hz phone screen an uncapped
+        // light game burns battery and heat on frames nobody sees; heavy games never reach 60 anyway.
+        fpsLimiterEnabled  = seed?.isFpsLimiterEnabled ?: GPUInformation.isAdreno810Class(context)
         matchRefreshRate   = seed?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = seed?.manualRefreshRate ?: 0
         maxGameRefreshRate = seed?.maxGameRefreshRate ?: 0

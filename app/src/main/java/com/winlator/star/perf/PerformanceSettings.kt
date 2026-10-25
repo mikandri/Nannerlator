@@ -1,5 +1,6 @@
 package com.winlator.star.perf
 
+import com.winlator.star.core.GPUInformation
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,6 +94,15 @@ object PerformanceSettings {
         _sustainedPerfMode.value = prefs.getBoolean(KEY_SUSTAINED, false)
         _perfPriorityBoost.value = prefs.getBoolean(KEY_PRIORITY, false)
         _preferBigCores.value = prefs.getBoolean(KEY_BIG_CORES, false)
+        // Adreno 810 (7s Gen 3) default: keep games on the performance cores while the user has never
+        // chosen. The GPU probe is a Vulkan instance creation, so it runs off the main thread (it also
+        // warms GPUInformation's renderer cache); an explicit choice is persisted and always wins.
+        if (!prefs.contains(KEY_BIG_CORES)) {
+            Thread({
+                val a810 = runCatching { GPUInformation.isAdreno810Class(ctx) }.getOrDefault(false)
+                if (a810 && !prefs.contains(KEY_BIG_CORES)) _preferBigCores.value = true
+            }, "perf-gpu-defaults").start()
+        }
         _dialogOpacity.value = prefs.getFloat(KEY_DIALOG_OPACITY, 1f).coerceIn(OPACITY_MIN, 1f)
         for (key in PerfRootApplier.ROOT_KEYS) {
             rootDefaults[key] = MutableStateFlow(prefs.getBoolean("global_$key", false))
