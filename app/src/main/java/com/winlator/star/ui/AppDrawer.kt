@@ -505,12 +505,12 @@ internal fun HelpSupportDialog(onDismiss: () -> Unit, onOpenUrl: (String) -> Uni
                 )
                 SupportLink(
                     label = "GitHub Repository",
-                    url = "https://github.com/The412Banner/Bannerlator",
+                    url = "https://github.com/mikandri/nannerlator",
                     onOpenUrl = onOpenUrl
                 )
                 SupportLink(
                     label = "Report an Issue",
-                    url = "https://github.com/The412Banner/Bannerlator/issues",
+                    url = "https://github.com/mikandri/nannerlator/issues",
                     onOpenUrl = onOpenUrl
                 )
                 SupportLink(

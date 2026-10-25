@@ -77,6 +77,9 @@ jobs:
     uses: ./.github/workflows/_build.yml
     with:
       release_number: ${{ inputs.release_number }}
+    secrets:
+      NANNER_KEYSTORE_B64: ${{ secrets.NANNER_KEYSTORE_B64 }}
+      NANNER_KEYSTORE_PASSWORD: ${{ secrets.NANNER_KEYSTORE_PASSWORD }}
 
   # Phase 1b — small in-app updates. One job per flavor: a direct patch from each of the last
   # PATCH_FROM app releases (stable and pre) to the new APK, each one applied back and checked
@@ -242,10 +245,10 @@ jobs:
           --arg atu "Bannerlator-${N}-antutu.apk" \
           --arg base "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${{ inputs.release_tag }}" \
           '{versionCode:$vc, versionName:$vn, notes:$notes, highlights:$hl[0], publishedAt:$date, minSupported:1,
-            apk:{"com.winlator.banner":$std,"com.ludashi.benchmark":$lud,"com.tencent.ig":$pbg,"com.antutu.ABenchMark":$atu},
-            apkUrl:{"com.winlator.banner":($base+"/"+$std),"com.ludashi.benchmark":($base+"/"+$lud),
+            apk:{"com.mikandri.nannerlator":$std,"com.ludashi.benchmark":$lud,"com.tencent.ig":$pbg,"com.antutu.ABenchMark":$atu},
+            apkUrl:{"com.mikandri.nannerlator":($base+"/"+$std),"com.ludashi.benchmark":($base+"/"+$lud),
                     "com.tencent.ig":($base+"/"+$pbg),"com.antutu.ABenchMark":($base+"/"+$atu)},
-            size:{"com.winlator.banner":$sstd,"com.ludashi.benchmark":$slud,"com.tencent.ig":$spbg,"com.antutu.ABenchMark":$satu}}' \
+            size:{"com.mikandri.nannerlator":$sstd,"com.ludashi.benchmark":$slud,"com.tencent.ig":$spbg,"com.antutu.ABenchMark":$satu}}' \
           > update.json
         # Small updates (3.1.6 on): patches = {old APK sha256: {file, url, from, size, sha256}} across all
         # flavors (the sha already says which flavor), apkSha256 = the new APK per package, checked
@@ -258,7 +261,7 @@ jobs:
         jq --slurpfile p patches.json \
            --arg base "$PATCH_BASE" \
            --arg hstd "$(sha standard)" --arg hlud "$(sha ludashi)" --arg hpbg "$(sha pubg)" --arg hatu "$(sha antutu)" \
-           '.apkSha256 = {"com.winlator.banner":$hstd,"com.ludashi.benchmark":$hlud,"com.tencent.ig":$hpbg,"com.antutu.ABenchMark":$hatu}
+           '.apkSha256 = {"com.mikandri.nannerlator":$hstd,"com.ludashi.benchmark":$hlud,"com.tencent.ig":$hpbg,"com.antutu.ABenchMark":$hatu}
             | .patches = ($p[0] | map_values(. + {url: ($base + "/" + .file)}))' \
            update.json > u.tmp && mv u.tmp update.json
         echo "Generated update.json:"; cat update.json

@@ -37,3 +37,5 @@ jobs:
       # (empty otherwise). release.yml deliberately does NOT pass this, so public release
       # APKs stay free of the proprietary jar until redistribution is explicitly decided.
       GALAXY_PERF_SDK_JAR_B64: ${{ secrets.GALAXY_PERF_SDK_JAR_B64 }}
+      NANNER_KEYSTORE_B64: ${{ secrets.NANNER_KEYSTORE_B64 }}
+      NANNER_KEYSTORE_PASSWORD: ${{ secrets.NANNER_KEYSTORE_PASSWORD }}

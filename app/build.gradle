@@ -57,6 +57,17 @@ tasks.register("downloadImageFS") {
 tasks.register("prepareKotlinBuildScriptModel"){}
 preBuild.dependsOn(downloadImageFS)
 
+// Private signing key (see signingConfigs.nanner). Both variables must be set, or we fall back to
+// the public testkey and say so loudly in the build log.
+def nannerKeystorePath = System.getenv("NANNER_KEYSTORE_FILE")
+def nannerKeystorePassword = System.getenv("NANNER_KEYSTORE_PASSWORD")
+def nannerKeystore = (nannerKeystorePath && nannerKeystorePassword && new File(nannerKeystorePath).isFile()) ?
+        new File(nannerKeystorePath) : null
+if (nannerKeystore == null) {
+    logger.warn("WARNING: NANNER_KEYSTORE_FILE / NANNER_KEYSTORE_PASSWORD not set: signing with the PUBLIC " +
+            "AOSP testkey. Do not distribute this APK.")
+}
+
 android {
     namespace 'com.winlator.star'
     compileSdk 34
@@ -118,16 +129,33 @@ android {
             enableV2Signing = true
             enableV3Signing = true
         }
+        // Nannerlator's own private key. The keystore and its password come from the
+        // environment (CI decodes them from the NANNER_KEYSTORE_B64 / NANNER_KEYSTORE_PASSWORD
+        // repository secrets) and are NEVER committed. The public testkey above can be used by
+        // anyone to sign an APK that installs over ours as an "update" and reads the app's data
+        // (store logins included), so it is only a fallback for builds made without the secrets.
+        if (nannerKeystore != null) {
+            nanner {
+                storeFile nannerKeystore
+                storeType "PKCS12"
+                storePassword nannerKeystorePassword
+                keyAlias(System.getenv("NANNER_KEY_ALIAS") ?: "nannerlator")
+                keyPassword nannerKeystorePassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
         debug {
             minifyEnabled false
-            signingConfig signingConfigs.testkey
+            signingConfig(nannerKeystore != null ? signingConfigs.nanner : signingConfigs.testkey)
         }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.testkey
+            signingConfig(nannerKeystore != null ? signingConfigs.nanner : signingConfigs.testkey)
             // Several animated-background frames (ab_*, ab_gear_*, ab_quilt_*) and the
             // ic_stat_ab_gear notification icon are GIFs with a .png extension. Release
             // enables PNG crunching by default and AAPT2 rejects them ("file failed to
@@ -148,23 +176,23 @@ android {
     productFlavors {
         standard {
             dimension "version"
-            applicationId "com.winlator.banner"
-            resValue "string", "app_name", "Bannerlator Bionic"
+            applicationId "com.mikandri.nannerlator"
+            resValue "string", "app_name", "Nannerlator"
         }
         ludashi {
             dimension "version"
             applicationId "com.ludashi.benchmark"
-            resValue "string", "app_name", "Bannerlator Bionic Ludashi"
+            resValue "string", "app_name", "Nannerlator Ludashi"
         }
         pubg {
             dimension "version"
             applicationId "com.tencent.ig"
-            resValue "string", "app_name", "Bannerlator Bionic PuBG"
+            resValue "string", "app_name", "Nannerlator PuBG"
         }
         antutu {
             dimension "version"
             applicationId "com.antutu.ABenchMark"
-            resValue "string", "app_name", "Bannerlator Bionic AnTuTu"
+            resValue "string", "app_name", "Nannerlator AnTuTu"
         }
     }
 

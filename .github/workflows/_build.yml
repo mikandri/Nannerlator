@@ -35,6 +35,12 @@ on:
       # Performance feature stays dormant. The proprietary jar is NEVER committed to the repo.
       GALAXY_PERF_SDK_JAR_B64:
         required: false
+      # Nannerlator's private signing key: the base64 of the PKCS12 keystore and its password.
+      # Without them the APK is signed with the public AOSP testkey (see app/build.gradle).
+      NANNER_KEYSTORE_B64:
+        required: false
+      NANNER_KEYSTORE_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -705,6 +711,24 @@ jobs:
           echo "Galaxy Performance SDK restored: $(wc -c < app/libs/GalaxyPerf/perfsdk-v1.0.0.jar) bytes"
         else
           echo "No Galaxy SDK secret set — building without it (Galaxy feature dormant)."
+        fi
+
+    - name: Restore the private signing key (from secrets)
+      # Decoded into the runner's temp dir (outside the workspace, never uploaded) and handed to
+      # Gradle through the environment. The secret is piped, never echoed, so it cannot leak into
+      # the log. No secret => public testkey fallback, flagged as a warning.
+      env:
+        KEYSTORE_B64: ${{ secrets.NANNER_KEYSTORE_B64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.NANNER_KEYSTORE_PASSWORD }}
+      run: |
+        if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+          KS="$RUNNER_TEMP/nannerlator.p12"
+          printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$KS"
+          echo "NANNER_KEYSTORE_FILE=$KS" >> "$GITHUB_ENV"
+          echo "NANNER_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "Private signing key restored: $(wc -c < "$KS") bytes"
+        else
+          echo "::warning::NANNER_KEYSTORE_B64 / NANNER_KEYSTORE_PASSWORD secrets are not set: this APK is signed with the PUBLIC testkey."
         fi
 
     - name: Build with Gradle
