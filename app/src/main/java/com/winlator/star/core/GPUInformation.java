@@ -162,6 +162,29 @@ public abstract class GPUInformation {
         return renderer;
     }
 
+    private static int cachedSystemBcn = -1;
+
+    /**
+     * Whether the SYSTEM Vulkan driver reports BCn (DXT) texture support: 1 yes, 0 no, -1 unknown.
+     * The launch used to assume every Qualcomm driver has it and turned all BCn emulation off on
+     * Adreno; a driver that lacks it then leaves BC-heavy DX titles (Unity games, ...) rendering black.
+     * A known answer is cached for the process; "unknown" is retried.
+     */
+    public static int systemBcnSupport(Context context) {
+        synchronized (GPUInformation.class) {
+            if (cachedSystemBcn != -1) return cachedSystemBcn;
+        }
+        int v = nativeBcnSupport(null, context);
+        if (v != -1) {
+            synchronized (GPUInformation.class) {
+                cachedSystemBcn = v;
+            }
+        }
+        return v;
+    }
+
+    private native static int nativeBcnSupport(String driverName, Context context);
+
     public native static String getVulkanVersion(String driverName, Context context);
     public native static int getVendorID(String driverName, Context context);
     private native static String nativeGetRenderer(String driverName, Context context);

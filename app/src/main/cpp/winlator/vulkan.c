@@ -23,6 +23,7 @@ PFN_vkGetPhysicalDeviceProperties getPhysicalDeviceProperties;
 PFN_vkEnumerateDeviceExtensionProperties enumerateDeviceExtensionProperties;
 PFN_vkEnumeratePhysicalDevices enumeratePhysicalDevices;
 PFN_vkDestroyInstance destroyInstance;
+PFN_vkGetPhysicalDeviceFeatures getPhysicalDeviceFeatures;
 
 static void *vulkan_handle = NULL;
 
@@ -263,6 +264,7 @@ static VkResult create_instance(jstring driverName, JNIEnv *env, jobject context
     destroyInstance = (PFN_vkDestroyInstance)gip(instance, "vkDestroyInstance");
     enumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)gip(instance, "vkEnumerateDeviceExtensionProperties");
     enumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)gip(instance, "vkEnumeratePhysicalDevices");
+    getPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures)gip(instance, "vkGetPhysicalDeviceFeatures");
 
     if (!getPhysicalDeviceProperties || !destroyInstance || !enumerateDeviceExtensionProperties || !enumeratePhysicalDevices)
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -488,6 +490,44 @@ static jobjectArray probe_enumerateExtensions(JNIEnv *env, jclass obj, jstring d
     return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
 }
 
+// 1 = the driver reports textureCompressionBC, 0 = it does not, -1 = could not tell. Qualcomm's
+// proprietary driver does not expose BCn on every Adreno, so the launch asks instead of assuming.
+static jint probe_bcnSupport(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+    install_probe_signal_guard();
+
+    if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
+        VkPhysicalDeviceFeatures features = {};
+        jint supported;
+
+        if (create_instance(driverName, env, context) != VK_SUCCESS || !getPhysicalDeviceFeatures) {
+            restore_probe_signal_guard();
+            cleanup_vulkan();
+            return -1;
+        }
+
+        if (enumerate_physical_devices() != VK_SUCCESS) {
+            destroyInstance(instance, NULL);
+            restore_probe_signal_guard();
+            cleanup_vulkan();
+            return -1;
+        }
+
+        getPhysicalDeviceFeatures(physicalDevice, &features);
+        supported = features.textureCompressionBC ? 1 : 0;
+
+        destroyInstance(instance, NULL);
+
+        restore_probe_signal_guard();
+        cleanup_vulkan();
+        return supported;
+    }
+
+    printf("Probe signal caught: driver incompatible");
+    restore_probe_signal_guard();
+    cleanup_vulkan();
+    return -1;
+}
+
 // Every probe shares this file's globals (instance, physicalDevice, vulkan_handle, the jump
 // buffer and the saved signal handlers) and swaps process-wide signal handlers while it runs,
 // so two probes from different threads must never overlap. Callers in Kotlin only partly
@@ -521,6 +561,14 @@ JNIEXPORT jobjectArray JNICALL
 Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
     pthread_mutex_lock(&probe_lock);
     jobjectArray result = probe_enumerateExtensions(env, obj, driverName, context);
+    pthread_mutex_unlock(&probe_lock);
+    return result;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_winlator_star_core_GPUInformation_nativeBcnSupport(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
+    pthread_mutex_lock(&probe_lock);
+    jint result = probe_bcnSupport(env, obj, driverName, context);
     pthread_mutex_unlock(&probe_lock);
     return result;
 }

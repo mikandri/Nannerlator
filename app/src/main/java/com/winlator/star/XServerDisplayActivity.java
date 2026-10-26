@@ -13676,6 +13676,41 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    // "Qualcomm = native BCn" was assumed for every Adreno, which turned every BCn path (the wrapper's
+
+    // own emulation and the bcn_layer) off on Qualcomm. The proprietary driver does not expose BCn on
+
+    // every part, and without it BC-compressed textures come out black (Unity's splash, menus and
+
+    // world). So for the SYSTEM driver we ask it; a custom AdrenoTools driver (Turnip, which has BCn,
+
+    // or a Qualcomm blob, which we never probe in-process) keeps the old assumption.
+
+    private boolean qualcommWithNativeBcn(String adrenoToolsDriverId) {
+
+        if (GPUInformation.getVendorID(null, null) != 0x5143) return false;
+
+        boolean systemDriver = adrenoToolsDriverId == null || adrenoToolsDriverId.isEmpty()
+
+                || "System".equals(adrenoToolsDriverId);
+
+        if (!systemDriver) return true;
+
+        int bcn = GPUInformation.systemBcnSupport(this);
+
+        String msg = "Qualcomm system driver textureCompressionBC=" + (bcn == 1 ? "yes" : bcn == 0 ? "NO" : "unknown")
+
+                + (bcn == 0 ? " -> BCn emulation enabled" : "");
+
+        Log.i("GraphicsDriverExtraction", msg);
+
+        if (wineDebugWriter != null) wineDebugWriter.println("XServerVulkan: " + msg);
+
+        return bcn != 0;
+
+    }
+
+
     private void extractGraphicsDriverFiles() {
     // 1. Retrieve the selected driver name from the config
     String selectedDriver = graphicsDriverConfig.get("graphicsDriver");
@@ -13968,7 +14003,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // overhead and can abort BC-heavy DX11 titles (e.g. Skyrim AE) on load. Force it
             // OFF on Qualcomm, mirroring the ENABLE_BCN_COMPUTE guards below and the bcn_layer
             // vendor gate. Only 0x5143 is skipped; Mali/Xclipse/PowerVR behaviour is unchanged.
-            boolean isQualcomm = GPUInformation.getVendorID(null, null) == 0x5143;
+            boolean isQualcomm = qualcommWithNativeBcn(adrenoToolsDriverId);
             // BCn double-decode fix: "Type = compute" activates leegao's STANDALONE libbcn_layer.so
             // (via ENABLE_BCN_COMPUTE) — a full BCn decoder on its own. The wrapper ICD ALSO has its
             // own integrated BCn (WRAPPER_EMULATE_BCN). Before, auto/full set BOTH, so on a non-Qualcomm
@@ -14025,7 +14060,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // are the target case, so the layer is activated on them. Adreno/Qualcomm (0x5143) has
         // NATIVE BCn — transcode would be wasted overhead — so it is skipped there, exactly like
         // the legacy wrapper BCn block's own != 0x5143 guard.
-        boolean activateBcnLayer = GPUInformation.getVendorID(null, null) != 0x5143;
+        boolean activateBcnLayer = !qualcommWithNativeBcn(adrenoToolsDriverId);
 
         if (activateBcnLayer) {
         if (useGamenativeEngine) {
