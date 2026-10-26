@@ -203,6 +203,26 @@ object SevenZip {
         val freeArcArchive: File? = null,
     )
 
+    /** True when [file] starts with the FreeArc archive signature `ArC\u0001`. Reads 4 bytes. */
+    fun isFreeArc(file: File): Boolean {
+        if (!file.isFile || file.length() < 4L) return false
+        return try {
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                val head = ByteArray(4)
+                raf.read(head) == 4 && sig(head, 0x41, 0x72, 0x43, 0x01)
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** The first sibling `.bin` of [installer] (by name) that is a FreeArc archive, or null. */
+    private fun firstSniffedFreeArcBin(installer: File): File? =
+        installer.parentFile?.listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".bin", ignoreCase = true) }
+            ?.sortedBy { it.name.lowercase() }
+            ?.firstOrNull { isFreeArc(it) }
+
     /** The lowest-numbered `Setup-N.bin` FreeArc data volume next to [installer] (the unarc entry point). */
     private fun firstFreeArcVolume(installer: File): File? =
         installer.parentFile?.listFiles()
@@ -224,11 +244,17 @@ object SevenZip {
     fun classifyInno(context: Context, installer: File): InnoClassification {
         val records = readRecordsIni(installer.parentFile)
         val rawType = records?.first
-        val freeArc = rawType?.trim()?.startsWith("freearc", ignoreCase = true) == true
+        val recordsFreeArc = rawType?.trim()?.startsWith("freearc", ignoreCase = true) == true
+        // Not every FreeArc/ISDone repack ships a Records.ini or names its data `Setup-N.bin`: some
+        // carry a single `data.bin` next to `setup.exe`. Routed to innoextract, those unpacked only
+        // the installer's own scripts and DLLs, never the game. So also sniff the sibling .bin files
+        // for the FreeArc signature.
+        val sniffedBin = if (recordsFreeArc) null else firstSniffedFreeArcBin(installer)
+        val freeArc = recordsFreeArc || sniffedBin != null
         // FreeArc → decode the Setup-*.bin volumes natively with unarc when it's available; otherwise
         // fall back to the container installer. (A srep-layered repack that unarc can't decode fails at
         // runtime, and the UI turns that into the honest container/PC message — no proactive probe.)
-        val firstBin = if (freeArc) firstFreeArcVolume(installer) else null
+        val firstBin = if (freeArc) (firstFreeArcVolume(installer) ?: sniffedBin) else null
         val route = when {
             !freeArc -> InnoRoute.INNOEXTRACT
             firstBin != null && Unarc.isAvailable(context) -> InnoRoute.FREEARC_NATIVE
@@ -237,7 +263,7 @@ object SevenZip {
         return InnoClassification(
             installer = installer,
             route = route,
-            compression = rawType?.let { prettyCompression(it) },
+            compression = rawType?.let { prettyCompression(it) } ?: if (sniffedBin != null) "FreeArc" else null,
             declaredSize = records?.second?.let { prettySize(it) },
             freeArcArchive = firstBin,
         )
