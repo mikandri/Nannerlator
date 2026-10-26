@@ -2834,6 +2834,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setPerfPriorityBoost(resolvedPerfPriorityBoost());
         XServerDrawerState.INSTANCE.setPreferBigCores(preferBig);
         getWindow().setSustainedPerformanceMode(sustainedPerf);
+        armThermalFpsGovernor();
 
         // PerfRootApplier-owned toggles: seed the drawer with the effective (override ?? global) values
         // and apply the effective state now. The five root-only ones no-op unless root is granted; the
@@ -7367,6 +7368,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         sessionInForeground = false;
+        disarmThermalFpsGovernor();
         if (accountGameSessionCounted) {
             accountGameSessionCounted = false;
             com.winlator.star.store.SteamAccountStore.INSTANCE.gameSessionClosed();
@@ -16244,6 +16246,75 @@ return true;
             && s.getFrameGenMultiplier().getValue() >= 2;
     }
 
+    // ───── Thermal FPS governor (Nannerlator) ─────
+    // A phone has no fan: an uncapped or high cap heats the SoC until the system throttles it hard,
+    // and the game ends up stuttering below the cap. When Android reports the device as warm we lower
+    // the ACTIVE limiter cap a step instead (MODERATE: 3/4 of it, at least 30; SEVERE and worse: half,
+    // at least 20) and give it back once the status drops. The OEM's status already has hysteresis,
+    // so there is no extra timer here. It only ever lowers a cap the user turned on (limiter off =
+    // left alone), never writes the user's value, and the drawer keeps showing the user's own cap.
+    // Opt-out: NANNER_THERMAL_GOVERNOR=0 in the container or game environment variables.
+    private Object thermalGovernorListener;     // PowerManager.OnThermalStatusChangedListener (API 29)
+    private volatile int thermalGovernorStatus = 0;
+    private int thermalGovernorAnnounced = 0;
+
+    private boolean thermalGovernorDisabled() {
+        String v = envVars.get("NANNER_THERMAL_GOVERNOR");
+        return "0".equals(v) || "false".equalsIgnoreCase(v);
+    }
+
+    private int thermalClampFps(int fps) {
+        if (fps <= 0 || thermalGovernorDisabled()) return fps;
+        int status = thermalGovernorStatus;
+        if (status >= 3) return Math.min(fps, Math.max(20, fps / 2));             // SEVERE+
+        if (status == 2) return Math.min(fps, Math.max(30, (fps * 3) / 4));       // MODERATE
+        return fps;
+    }
+
+    private void armThermalFpsGovernor() {
+        if (thermalGovernorListener != null || android.os.Build.VERSION.SDK_INT < 29) return;
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(android.content.Context.POWER_SERVICE);
+            if (pm == null) return;
+            android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+            android.os.PowerManager.OnThermalStatusChangedListener l = status -> {
+                int level = status >= 3 ? 3 : (status == 2 ? 2 : 0);
+                int previous = thermalGovernorStatus >= 3 ? 3 : (thermalGovernorStatus == 2 ? 2 : 0);
+                thermalGovernorStatus = status;
+                if (level == previous || isFinishing() || thermalGovernorDisabled()) return;
+                XServerDrawerState d = XServerDrawerState.INSTANCE;
+                boolean limOn = d.getFpsLimiterEnabled().getValue();
+                int cap = d.getFpsLimit().getValue();
+                Log.i("XServerDisplayActivity", "thermal governor: status " + status + " -> level " + level
+                        + (limOn && cap > 0 ? ", cap " + cap + " -> " + thermalClampFps(cap) : " (limiter off: not touched)"));
+                if (!limOn || cap <= 0) return;
+                reapplyFpsLimit();
+                if (level != thermalGovernorAnnounced) {
+                    thermalGovernorAnnounced = level;
+                    AppUtils.showToast(this, level == 0
+                            ? "Device cooled down: FPS cap back to " + cap
+                            : "Device is hot: FPS cap lowered to " + thermalClampFps(cap) + " until it cools");
+                }
+            };
+            pm.addThermalStatusListener(main::post, l);
+            thermalGovernorListener = l;
+            thermalGovernorStatus = pm.getCurrentThermalStatus();
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "thermal governor: no thermal status listener", t);
+        }
+    }
+
+    private void disarmThermalFpsGovernor() {
+        if (android.os.Build.VERSION.SDK_INT >= 29 && thermalGovernorListener != null) {
+            try {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(android.content.Context.POWER_SERVICE);
+                if (pm != null) pm.removeThermalStatusListener(
+                        (android.os.PowerManager.OnThermalStatusChangedListener) thermalGovernorListener);
+            } catch (Throwable ignored) {}
+        }
+        thermalGovernorListener = null;
+    }
+
     // Re-evaluate and re-apply the FPS cap from the remembered limiter state. Called when the
     // frame-gen config changes live (e.g. switching lsfg multiplier) so the lsfgGovernsFps() guard
     // takes effect immediately without the user touching the limiter toggle.
@@ -16258,6 +16329,9 @@ return true;
     // the guest by pacing its IdleNotify (so the game itself slows -> in-game HUD reflects it, GPU
     // drops). Also feeds the renderer's SurfaceControl frame-rate hint (active in Vulkan native mode).
     private void applyFpsLimit(int fps) {
+        // Thermal governor first, so everything below (pacing, renderer hint, VRR vote) sees the
+        // cap the device can actually sustain right now. No-op while the device is cool.
+        fps = thermalClampFps(fps);
         // Capture the un-guarded cap (the limiter value, 0 = uncapped) BEFORE the lsfg guard zeroes
         // the local `fps`. VRR votes the DISPLAYED rate, which in the lsfg-governs case is cap x mult
         // even though the present pacer steps aside (fps -> 0). This is the only place the two diverge.
