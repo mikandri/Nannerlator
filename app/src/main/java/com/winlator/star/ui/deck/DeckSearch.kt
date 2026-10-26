@@ -136,9 +136,10 @@ internal fun DeckSearchOverlay(
         else shortcuts.filter { it.name.lowercase().contains(q) || storeLabelOf(it).lowercase().contains(q) }
             .sortedWith(compareBy<Shortcut> { !it.name.lowercase().startsWith(q) }.thenBy { it.name.lowercase() })
     }
-    val places = remember(q) {
+    val showStores by com.winlator.star.ui.theme.AppThemeState.showStores.collectAsState()
+    val places = remember(q, showStores) {
         if (q.isEmpty()) emptyList()
-        else DESTINATIONS.filter { d -> q.split(' ').filter { it.isNotBlank() }.all { w -> d.title.lowercase().contains(w) || d.keywords.contains(w) } }
+        else DESTINATIONS.filter { d -> (showStores || d.store == null) && q.split(' ').filter { it.isNotBlank() }.all { w -> d.title.lowercase().contains(w) || d.keywords.contains(w) } }
     }
     val fieldRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {

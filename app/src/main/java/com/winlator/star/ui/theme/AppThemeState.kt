@@ -22,8 +22,8 @@ object AppThemeState {
     private val _isDarkMode = MutableStateFlow(true)
     val isDarkMode: StateFlow<Boolean> = _isDarkMode
 
-    /** Whether the drawer's "Stores" section (GOG, Epic, Amazon, Steam) is shown. */
-    private val _showStores = MutableStateFlow(true)
+    /** Whether the drawer's "Stores" section (GOG, Epic, Amazon, Steam) is shown. Nannerlator: off by default. */
+    private val _showStores = MutableStateFlow(false)
     val showStores: StateFlow<Boolean> = _showStores
 
     /** The two drawer storage cards, toggled independently. */
@@ -96,7 +96,7 @@ object AppThemeState {
         _customAccent.value = Color(savedAccent)
         _customBaseIndex.value = themePrefs.getInt("custom_base_index", 1).coerceIn(0, CUSTOM_PRESET_INDEX)
         _isDarkMode.value = true
-        _showStores.value = themePrefs.getBoolean("show_stores", true)
+        _showStores.value = themePrefs.getBoolean("show_stores", false)
         _showInternalStorage.value = themePrefs.getBoolean("show_internal_storage", true)
         _showSdStorage.value = themePrefs.getBoolean("show_sd_storage", true)
         _uiScale.value = themePrefs.getFloat("ui_scale", 0.9f).coerceIn(0.5f, 1.5f)
@@ -112,7 +112,7 @@ object AppThemeState {
         themePrefs.edit().putString("ui_style", v).apply()
     }
 
-    /** Show or hide the drawer's Stores section. Default on, so nothing changes until asked. */
+    /** Show or hide the drawer's Stores section. Nannerlator ships it off; Appearance → "Show game stores" turns it on. */
     fun setShowStores(show: Boolean) {
         _showStores.value = show
         themePrefs.edit().putBoolean("show_stores", show).apply()
